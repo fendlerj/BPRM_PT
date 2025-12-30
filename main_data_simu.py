@@ -6,7 +6,7 @@ Created on Tue Apr 11 15:00:20 2023
 """
 
 import os
-os.chdir('C:/Users/Julie/Documents/Publication/article_BPRM/BPRM_PT_gamma_data_simu/') #path where the files basics, parameters_AM, parameters_EM, parameters_DM and MCMC are.
+os.chdir('path_code') #path where the files basics, parameters_AM, parameters_EM, parameters_DM and MCMC are.
 import numpy as np
 import basics as basics
 import parameters_AM as pAM
@@ -18,7 +18,7 @@ import scipy.stats as stats
 import time
 
 #path where the data file is
-filename = 'C:/Users/Julie/Documents/Publication/article_BPRM/data1.csv' 
+filename = 'path_data/data.csv' 
 
 #Set seed
 seed = 123
@@ -29,7 +29,7 @@ disease_model = 'EHR'
 #name of the chain - 
 chain = 'chain1'
 #path where the results should be saved
-path_results = os.path.join('C:/Users/Julie/Documents/Publication/article_BPRM//test_res_code_python')
+path_results = os.path.join('path_res')
 
 #Load the data frame
 frame = basics.load_data(filename)
@@ -117,3 +117,4 @@ t1 = time.time()
 MCMC.run_adaptive_MCMC(nb_phases,nb_iter, burnin)
 t2 = time.time()
 print(t2- t1)
+
