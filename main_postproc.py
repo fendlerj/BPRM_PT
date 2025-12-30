@@ -7,11 +7,11 @@ Created on Thu Apr 20 09:34:19 2023
 
 import numpy as np
 import os
-os.chdir('C:/Users/Julie/Documents/Publication/article_BPRM/BPRM_PT_gamma_data_simu/')#path where the files basics, parameters_AM, parameters_EM, parameters_DM and MCMC are.
+os.chdir('path_code')#path where the files function_postproc
 import function_postproc as f_postproc
 
 #Path to save the results
-path_results = os.path.join('C:/Users/Julie/Documents/Publication/article_BPRM//test_res_code_python')
+path_results = os.path.join('path_results')
 chain = 'chain1'
 chain_C = np.load(path_results + "/v1"  + chain + 'C'+ ".npy")
 
@@ -26,3 +26,4 @@ for iter_C in range(n_burnin +1 ,nb_iter) :
 
 #Save the mean similarity matrix    
 np.savetxt(path_results +"/S_mean_" + chain +".csv", S_mean, delimiter=",")
+
