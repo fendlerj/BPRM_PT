@@ -16,7 +16,7 @@ A toy dataset (data.csv) is provided.
 ### Steps
 ```bash
 git clone https://github.com/fendlerj/BPRM_PT.git
-cd project
+cd BPRM_PT
 pip install -r requirements.txt
 ```
 ## Usage
