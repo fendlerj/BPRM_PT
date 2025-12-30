@@ -3,7 +3,7 @@
 This code infers a Bayesian Profile Regression Mixture (BPRM) model with an MCMC algorithm including a parallel tempering scheme.
 
 ## Overview
-This code is associated with the work **Considering parallel tempering and comparing post-treatment procedures in Bayesian Profile Regression Models for a survival outcome and correlated exposures**, Fendler J, Guihenneuc C and Ancelet A. 2025. For more details on the methodology, please consult the article (https://doi.org/10.48550/arXiv.2512.23571).
+This code is associated with the work **Considering parallel tempering and comparing post-treatment procedures in Bayesian Profile Regression Models for a survival outcome and correlated exposures**, Fendler J, Guihenneuc C and Ancelet A. 2025. For more details on the methodology, please consult the related article (https://doi.org/10.48550/arXiv.2512.23571).
 
 A toy dataset (data.csv) is provided.
 
