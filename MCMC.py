@@ -3,336 +3,195 @@
 Created on Wed Apr  5 17:40:45 2023
 
 @author: FENDLER-JUL
+
+MCMC with parallel temering
 """
 
 import chain_MCMC
 import numpy as np
 import functions_mcmc as f_MCMC
-from random import sample
+from random import randrange
+
+# Parameters exchanged between two chains when a swap is accepted
+# (object attribute, value attribute)
+SWAP_ATTRIBUTES = [('beta', 'beta_curr'), ('eta', 'eta_curr'), ('xi', 'xi_curr'),
+                   ('mu_R', 'mu_curr'), ('mu_G', 'mu_curr'), ('mu_P', 'mu_curr'), ('mu_A', 'mu_curr'),
+                   ('tau_R', 'tau_curr'), ('tau_G', 'tau_curr'), ('tau_P', 'tau_curr'), ('tau_A', 'tau_curr'),
+                   ('C', 'C_curr'), ('U', 'U_curr'), ('phi', 'phi_curr'), ('V', 'V_curr'),
+                   ('alpha', 'alpha_curr')]
+
+# Parameters of the cold chain saved to disk: name -> (object attribute, value attribute)
+SAVED_PARAMETERS = {'beta': ('beta', 'beta_curr'), 'eta': ('eta', 'eta_curr'),
+                    'xi': ('xi', 'xi_curr'), 'alpha': ('alpha', 'alpha_curr'),
+                    'mu_R': ('mu_R', 'mu_curr'), 'mu_G': ('mu_G', 'mu_curr'),
+                    'mu_P': ('mu_P', 'mu_curr'), 'mu_A': ('mu_A', 'mu_curr'),
+                    'tau_R': ('tau_R', 'tau_curr'), 'tau_G': ('tau_G', 'tau_curr'),
+                    'tau_P': ('tau_P', 'tau_curr'), 'tau_A': ('tau_A', 'tau_curr'),
+                    'C': ('C', 'C_curr')}
+
 
 class MCMC_PT():
-    
-    def __init__(self, chain, path_results, disease_model, 
-               alpha_start, C_start, V_start, phi_start,U_start, mu_R_start, 
-               tau_R_start, mu_G_start, tau_G_start, mu_P_start, tau_P_start,
-               mu_A_start, tau_A_start, beta_start, eta_start, xi_start, Z_R, 
-               Z_G, Z_P, Z_A, y, trunc_y, event,
-               i_expo, seed = 0, vect_T = [1,2,5,10,20]):
-        
-        # initialise the chain at temperature number 1
-        self.chain1 = chain_MCMC.chain_MCMC(disease_model, 
-                   alpha_start, C_start, V_start, phi_start,U_start, mu_R_start, 
-                   tau_R_start, mu_G_start, tau_G_start, mu_P_start, tau_P_start,
-                   mu_A_start, tau_A_start, beta_start, eta_start, xi_start, Z_R, 
-                   Z_G, Z_P, Z_A,  y, trunc_y, event,
-                   i_expo, seed, vect_T[0])
-        
-        # initialise the chain at temperature number 2
-        self.chain2 = chain_MCMC.chain_MCMC(disease_model, 
-                   alpha_start, C_start, V_start, phi_start,U_start, mu_R_start, 
-                   tau_R_start, mu_G_start, tau_G_start, mu_P_start, tau_P_start,
-                   mu_A_start, tau_A_start, beta_start, eta_start, xi_start, Z_R, 
-                   Z_G, Z_P, Z_A, y, trunc_y, event,
-                   i_expo, seed, vect_T[1])
-        
-        # initialise the chain at temperature number 3
-        self.chain3 = chain_MCMC.chain_MCMC(disease_model, 
-                   alpha_start, C_start, V_start, phi_start,U_start, mu_R_start, 
-                   tau_R_start, mu_G_start, tau_G_start, mu_P_start, tau_P_start,
-                   mu_A_start, tau_A_start, beta_start, eta_start, xi_start, Z_R, 
-                   Z_G, Z_P, Z_A, y, trunc_y, event,
-                   i_expo, seed, vect_T[2])
-        
-        # initialise the chain at temperature number 4
-        self.chain4 = chain_MCMC.chain_MCMC(disease_model, 
-                   alpha_start, C_start, V_start, phi_start,U_start, mu_R_start, 
-                   tau_R_start, mu_G_start, tau_G_start, mu_P_start, tau_P_start,
-                   mu_A_start, tau_A_start, beta_start, eta_start, xi_start, Z_R, 
-                   Z_G, Z_P, Z_A, y, trunc_y, event,
-                   i_expo, seed, vect_T[3])
-        
-        # initialise the chain at temperature number 5
-        self.chain5 = chain_MCMC.chain_MCMC(disease_model, 
-                   alpha_start, C_start, V_start, phi_start,U_start, mu_R_start, 
-                   tau_R_start, mu_G_start, tau_G_start, mu_P_start, tau_P_start,
-                   mu_A_start, tau_A_start, beta_start, eta_start, xi_start, Z_R, 
-                   Z_G, Z_P, Z_A, y, trunc_y, event,
-                   i_expo, seed, vect_T[4])
-        
-        self.nb_T = len(vect_T)
+
+    def __init__(self, chain, path_results, disease_model,
+                 alpha_start, C_start, V_start, phi_start, U_start, mu_R_start,
+                 tau_R_start, mu_G_start, tau_G_start, mu_P_start, tau_P_start,
+                 mu_A_start, tau_A_start, beta_start, eta_start, xi_start, Z_R,
+                 Z_G, Z_P, Z_A, y, trunc_y, event,
+                 i_expo, seed=0, vect_T=[1.0, 1.10, 1.21, 1.33, 1.46, 1.61, 1.77], swap_every=10):
+
+        self.vect_T = list(vect_T)
+        self.nb_T = len(self.vect_T)
         self.path_results = path_results
         self.chain = chain
-        self.dict_chain = {0 : self.chain1, 1 : self.chain2, 2 : self.chain3,
-                           3 : self.chain4, 4 : self.chain5}
-        
-        
-        
-        
+        self.swap_every = swap_every
+
+        # One chain per temperature
+        self.chains = [chain_MCMC.chain_MCMC(disease_model,
+                                             alpha_start, C_start, V_start, phi_start, U_start, mu_R_start,
+                                             tau_R_start, mu_G_start, tau_G_start, mu_P_start, tau_P_start,
+                                             mu_A_start, tau_A_start, beta_start, eta_start, xi_start, Z_R,
+                                             Z_G, Z_P, Z_A, y, trunc_y, event,
+                                             i_expo, seed + k, T)
+                       for k, T in enumerate(self.vect_T)]
+
+        self.dict_chain = {k: ch for k, ch in enumerate(self.chains)}
+        self.chain1 = self.chains[0]
+
+        # Swap attempts / acceptances 
+        self.swap_attempts = np.zeros(max(self.nb_T - 1, 0))
+        self.swap_accepts = np.zeros(max(self.nb_T - 1, 0))
+
+    def _log_likelihood(self, ch):
+        """
+        Untempered log-likelihood of the current state of chain ch
+        """
+        return f_MCMC.log_likelihood(ch.disease_model, ch.beta.beta_curr,
+                                     ch.eta.eta_curr, ch.xi.xi_curr,
+                                     ch.mu_R.mu_curr, ch.tau_R.tau_curr,
+                                     ch.mu_G.mu_curr, ch.tau_G.tau_curr,
+                                     ch.mu_P.mu_curr, ch.tau_P.tau_curr,
+                                     ch.mu_A.mu_curr, ch.tau_A.tau_curr,
+                                     ch.C.C_curr, ch.y, ch.trunc_y, ch.event, ch.nevent, ch.i_expo,
+                                     ch.Z_R, ch.Z_G, ch.Z_P, ch.Z_A,
+                                     ch.xi.prior_shape, ch.xi.prior_intensity)
+
+    def _swap_states(self, chain_i, chain_j):
+        """
+        Exchange the states of two chains (the temperatures stay with the chains)
+        """
+        for obj_name, val_name in SWAP_ATTRIBUTES:
+            obj_i, obj_j = getattr(chain_i, obj_name), getattr(chain_j, obj_name)
+            val_i, val_j = getattr(obj_i, val_name), getattr(obj_j, val_name)
+            setattr(obj_i, val_name, val_j)
+            setattr(obj_j, val_name, val_i)
+
+    def attempt_swap(self):
+        """
+        Propose to swap the states of a random pair of neighbouring temperatures
+        """
+        if self.nb_T < 2:
+            return False
+        k = randrange(self.nb_T - 1)
+        chain_i, chain_j = self.chains[k], self.chains[k + 1]
+        log_prob_i = self._log_likelihood(chain_i)
+        log_prob_j = self._log_likelihood(chain_j)
+        accept = f_MCMC.accept_swap_PT(log_prob_i, log_prob_j, chain_i.T, chain_j.T)
+        self.swap_attempts[k] += 1
+        if accept:
+            self._swap_states(chain_i, chain_j)
+            self.swap_accepts[k] += 1
+        return accept
+
+    def swap_acceptance_rates(self):
+        """
+        Acceptance rate of the swaps for each neighbouring pair (nan if never attempted)
+        """
+        with np.errstate(invalid='ignore', divide='ignore'):
+            return self.swap_accepts / self.swap_attempts
+
+    def _save(self, samples, last=None):
+        for name, arr in samples.items():
+            f_MCMC.save_chain(arr if last is None else arr[:last], self.path_results, self.chain, name)
+
     def run_MCMC(self, niter):
         """
-        Run niter iteration of the MCMC algorithm
+        Run niter iterations of the MCMC algorithm for all the chains
         """
+        n_beta = len(self.chain1.beta.beta_curr)
 
-        #Initialise the vector of acceptance and the chain for each parameter
-        self.acceptance_eta_chain1 = np.zeros(niter)
-        self.acceptance_eta_chain2 = np.zeros(niter)
-        self.acceptance_eta_chain3 = np.zeros(niter)
-        self.acceptance_eta_chain4 = np.zeros(niter)
-        self.acceptance_eta_chain5 = np.zeros(niter)
-        self.acceptance_beta_chain1 = np.zeros((niter, len(self.chain1.beta.beta_curr)))* np.nan
-        self.acceptance_beta_chain2 = np.zeros((niter, len(self.chain1.beta.beta_curr)))* np.nan
-        self.acceptance_beta_chain3 = np.zeros((niter, len(self.chain1.beta.beta_curr)))* np.nan
-        self.acceptance_beta_chain4 = np.zeros((niter, len(self.chain1.beta.beta_curr)))* np.nan
-        self.acceptance_beta_chain5 = np.zeros((niter, len(self.chain1.beta.beta_curr)))* np.nan
+        # Acceptance vectors
+        self.acceptance_eta = np.zeros((self.nb_T, niter))
+        self.acceptance_beta = np.full((self.nb_T, niter, n_beta), np.nan)
         self.acceptance_swap = []
-        chain_beta = np.zeros((niter, len(self.chain1.beta.beta_curr)))
-        chain_eta = np.zeros(niter)
-        chain_xi = np.zeros(niter)
-        chain_alpha = np.zeros(niter)
-        chain_mu_R = np.zeros((niter, len(self.chain1.mu_R.mu_curr)))
-        chain_tau_R = np.zeros((niter, len(self.chain1.tau_R.tau_curr)))
-        chain_mu_G = np.zeros((niter, len(self.chain1.mu_G.mu_curr)))
-        chain_tau_G = np.zeros((niter, len(self.chain1.tau_G.tau_curr)))
-        chain_mu_P = np.zeros((niter, len(self.chain1.mu_P.mu_curr)))
-        chain_tau_P = np.zeros((niter, len(self.chain1.tau_P.tau_curr)))
-        chain_mu_A = np.zeros((niter, len(self.chain1.mu_A.mu_curr)))
-        chain_tau_A = np.zeros((niter, len(self.chain1.tau_A.tau_curr)))
-        chain_C = np.zeros((niter, len(self.chain1.C.C_curr)))
-       #Run niter iterations for the 5 chains
+
+        # Samples of the cold chain
+        samples = {}
+        for name, (obj_name, val_name) in SAVED_PARAMETERS.items():
+            value = np.asarray(getattr(getattr(self.chain1, obj_name), val_name))
+            samples[name] = np.zeros((niter,) + value.shape)
+
         for i in range(niter):
-            self.chain1.iter_1(i)
-            self.chain2.iter_1(i)
-            self.chain3.iter_1(i)
-            self.chain4.iter_1(i)
-            self.chain5.iter_1(i)
-            self.acceptance_eta_chain1[i] = self.chain1.acceptance_eta
-            self.acceptance_eta_chain2[i] = self.chain2.acceptance_eta
-            self.acceptance_eta_chain3[i] = self.chain3.acceptance_eta
-            self.acceptance_eta_chain4[i] = self.chain4.acceptance_eta
-            self.acceptance_eta_chain5[i] = self.chain5.acceptance_eta
-            self.acceptance_beta_chain1[i,:] = self.chain1.acceptance_beta
-            self.acceptance_beta_chain2[i,:] = self.chain2.acceptance_beta
-            self.acceptance_beta_chain3[i,:] = self.chain3.acceptance_beta
-            self.acceptance_beta_chain4[i,:] = self.chain4.acceptance_beta
-            self.acceptance_beta_chain5[i,:] = self.chain5.acceptance_beta
-        
-            #swap two chains every 100 iterations
-            if i%100 == 0 :
-                i_swap = sample([0,1,2,3], 1)[0]
-                j_swap = i_swap + 1 
-                chain_i = self.dict_chain[i_swap]
-                chain_j = self.dict_chain[j_swap]
-                accept_swap = False
-                log_prob_j = f_MCMC.log_posterior_density(chain_j.disease_model, chain_j.beta.beta_curr,
-                                                  chain_j.eta.eta_curr, chain_j.xi.xi_curr,  
-                                                  chain_j.mu_R.mu_curr, 
-                                                  chain_j.tau_R.tau_curr, chain_j.mu_G.mu_curr, 
-                                                  chain_j.tau_G.tau_curr, chain_j.mu_P.mu_curr, 
-                                                  chain_j.tau_P.tau_curr, chain_j.mu_A.mu_curr, 
-                                                  chain_j.tau_A.tau_curr, chain_j.C.C_curr, 
-                                                  chain_j.phi.phi_curr, chain_j.V.V_curr,
-                                                  chain_j.alpha.alpha_curr, chain_j.y, 
-                                                  chain_j.trunc_y, chain_j.event, chain_j.nevent, chain_j.i_expo, 
-                                                  chain_j.Z_R, chain_j.Z_G, chain_j.Z_P, 
-                                                  chain_j.Z_A, 
-                                                  chain_j.beta.prior_min, chain_j.beta.prior_mode, chain_j.beta.prior_max, 
-                                                  chain_j.eta.prior_shape, chain_j.eta.prior_intensity,
-                                                  chain_j.xi.prior_shape, chain_j.xi.prior_intensity,
-                                                  chain_j.mu_R.prior_mean, 
-                                                  chain_j.mu_R.prior_accuracy, chain_j.tau_R.prior_shape,
-                                                  chain_j.tau_R.prior_intensity, chain_j.mu_G.prior_mean,
-                                                  chain_j.mu_G.prior_accuracy, chain_j.tau_G.prior_shape, 
-                                                  chain_j.tau_G.prior_intensity, chain_j.mu_P.prior_mean, 
-                                                  chain_j.mu_P.prior_accuracy, chain_j.tau_P.prior_shape, 
-                                                  chain_j.tau_P.prior_intensity, chain_j.mu_A.prior_mean,
-                                                  chain_j.mu_A.prior_accuracy, chain_j.tau_A.prior_shape,
-                                                  chain_j.tau_A.prior_intensity, chain_j.alpha.prior_shape, 
-                                                  chain_j.alpha.prior_intensity)
-                
-                log_prob_i = f_MCMC.log_posterior_density(chain_i.disease_model, chain_i.beta.beta_curr,
-                                                  chain_i.eta.eta_curr, chain_i.xi.xi_curr,  
-                                                  chain_i.mu_R.mu_curr, 
-                                                  chain_i.tau_R.tau_curr, chain_i.mu_G.mu_curr, 
-                                                  chain_i.tau_G.tau_curr, chain_i.mu_P.mu_curr, 
-                                                  chain_i.tau_P.tau_curr, chain_i.mu_A.mu_curr, 
-                                                  chain_i.tau_A.tau_curr, chain_i.C.C_curr, 
-                                                  chain_i.phi.phi_curr, chain_i.V.V_curr,
-                                                  chain_i.alpha.alpha_curr, chain_i.y, 
-                                                  chain_i.trunc_y, chain_i.event, chain_i.nevent, chain_i.i_expo, 
-                                                  chain_i.Z_R, chain_i.Z_G, chain_i.Z_P, 
-                                                  chain_i.Z_A,
-                                                  chain_i.beta.prior_min, chain_i.beta.prior_mode, chain_i.beta.prior_max, 
-                                                  chain_i.eta.prior_shape, chain_i.eta.prior_intensity,
-                                                  chain_i.xi.prior_shape, chain_i.xi.prior_intensity,
-                                                  chain_i.mu_R.prior_mean, 
-                                                  chain_i.mu_R.prior_accuracy, chain_i.tau_R.prior_shape,
-                                                  chain_i.tau_R.prior_intensity, chain_i.mu_G.prior_mean,
-                                                  chain_i.mu_G.prior_accuracy, chain_i.tau_G.prior_shape, 
-                                                  chain_i.tau_G.prior_intensity, chain_i.mu_P.prior_mean, 
-                                                  chain_i.mu_P.prior_accuracy, chain_i.tau_P.prior_shape, 
-                                                  chain_i.tau_P.prior_intensity, chain_i.mu_A.prior_mean,
-                                                  chain_i.mu_A.prior_accuracy, chain_i.tau_A.prior_shape,
-                                                  chain_i.tau_A.prior_intensity, chain_i.alpha.prior_shape, 
-                                                  chain_i.alpha.prior_intensity)
-                
-                if f_MCMC.accept_swap_PT(log_prob_i, log_prob_j, chain_i.T, chain_j.T) :
-                    #If accept swap, swap all the parameters of the two chains
-                    chain_i.beta.beta_curr, chain_j.beta.beta_curr = chain_j.beta.beta_curr, chain_i.beta.beta_curr
-                    chain_i.eta.eta_curr, chain_j.eta.eta_curr = chain_j.eta.eta_curr, chain_i.eta.eta_curr
-                    chain_i.xi.xi_curr, chain_j.xi.xi_curr = chain_j.xi.xi_curr, chain_i.xi.xi_curr
-                    chain_i.mu_R.mu_curr, chain_j.mu_R.mu_curr = chain_j.mu_R.mu_curr, chain_i.mu_R.mu_curr
-                    chain_i.mu_G.mu_curr, chain_j.mu_G.mu_curr = chain_j.mu_G.mu_curr, chain_i.mu_G.mu_curr
-                    chain_i.mu_P.mu_curr, chain_j.mu_P.mu_curr = chain_j.mu_P.mu_curr, chain_i.mu_P.mu_curr
-                    chain_i.mu_A.mu_curr, chain_j.mu_A.mu_curr = chain_j.mu_A.mu_curr, chain_i.mu_A.mu_curr
-                    chain_i.tau_R.tau_curr, chain_j.tau_R.tau_curr = chain_j.tau_R.tau_curr, chain_i.tau_R.tau_curr
-                    chain_i.tau_G.tau_curr, chain_j.tau_G.tau_curr = chain_j.tau_G.tau_curr, chain_i.tau_G.tau_curr
-                    chain_i.tau_P.tau_curr, chain_j.tau_P.tau_curr = chain_j.tau_P.tau_curr, chain_i.tau_P.tau_curr
-                    chain_i.tau_A.tau_curr, chain_j.tau_A.tau_curr = chain_j.tau_A.tau_curr, chain_i.tau_A.tau_curr
-                    chain_i.C.C_curr, chain_j.C.C_curr = chain_j.C.C_curr, chain_i.C.C_curr 
-                    chain_i.U.U_curr, chain_j.U.U_curr = chain_j.U.U_curr, chain_i.U.U_curr 
-                    chain_i.phi.phi_curr, chain_j.phi.phi_curr = chain_j.phi.phi_curr, chain_i.phi.phi_curr 
-                    chain_i.V.V_curr, chain_j.V.V_curr = chain_j.V.V_curr, chain_i.V.V_curr 
-                    chain_i.alpha.alpha_curr, chain_j.alpha.alpha_curr = chain_j.alpha.alpha_curr, chain_i.alpha.alpha_curr 
-                    accept_swap = True
-                self.acceptance_swap.append(accept_swap)
+            for k, ch in enumerate(self.chains):
+                ch.iter_1(i)
+                self.acceptance_eta[k, i] = ch.acceptance_eta
+                self.acceptance_beta[k, i, :] = ch.acceptance_beta
 
-            #save chains
-            chain_beta[i,:] = self.chain1.beta.beta_curr
-            chain_eta[i] = self.chain1.eta.eta_curr
-            chain_xi[i] = self.chain1.xi.xi_curr
-            chain_alpha[i] = self.chain1.alpha.alpha_curr
-            chain_mu_R[i,:] = self.chain1.mu_R.mu_curr
-            chain_tau_R[i,:] = self.chain1.tau_R.tau_curr
-            chain_mu_G[i,:] = self.chain1.mu_G.mu_curr
-            chain_tau_G[i,:] = self.chain1.tau_G.tau_curr
-            chain_mu_P[i,:] = self.chain1.mu_P.mu_curr
-            chain_tau_P[i,:] = self.chain1.tau_P.tau_curr
-            chain_mu_A[i,:] = self.chain1.mu_A.mu_curr
-            chain_tau_A[i,:] = self.chain1.tau_A.tau_curr 
-            chain_C[i,:] = self.chain1.C.C_curr
-            
-            if i > 0 and i% 500 == 0: #Intermediate save every 500 iterations
+            # Swap two neighbouring chains every swap_every iterations
+            if self.nb_T > 1 and i % self.swap_every == 0:
+                self.acceptance_swap.append(self.attempt_swap())
+
+            # Store the cold chain
+            for name, (obj_name, val_name) in SAVED_PARAMETERS.items():
+                samples[name][i] = getattr(getattr(self.chain1, obj_name), val_name)
+
+            if i > 0 and i % 500 == 0:  # Intermediate save every 500 iterations
                 print(i)
-                # print('beta')
-                # print(np.mean(chain_beta[i-500:i,], axis = 0))
-                # print('eta')
-                # print(np.mean(self.acceptance_eta_chain1[i-500:i]))
-                # print(np.mean(chain_eta[i-500:i]))
-                # print(np.mean(chain_xi[i-500:i]))
-                # print(np.mean(chain_alpha[i-500:i]))
-                # print('acceptance rate swap')
-                # print(np.mean(self.acceptance_swap))
+                self._save(samples, last=i)
 
-                #save_beta
-                f_MCMC.save_chain(chain_beta[:i,] , self.path_results, self.chain, 'beta')
-                #save_eta
-                f_MCMC.save_chain(chain_eta[:i] , self.path_results, self.chain, 'eta')
-                #save xi
-                f_MCMC.save_chain(chain_xi [:i], self.path_results, self.chain, 'xi')
-                #save_alpha
-                f_MCMC.save_chain(chain_alpha [:i], self.path_results, self.chain, 'alpha')
-                #save_mu
-                f_MCMC.save_chain(chain_mu_R[:i,] , self.path_results, self.chain, 'mu_R')
-                f_MCMC.save_chain(chain_mu_G[:i,] , self.path_results, self.chain, 'mu_G')
-                f_MCMC.save_chain(chain_mu_P[:i,] , self.path_results, self.chain, 'mu_P')
-                f_MCMC.save_chain(chain_mu_A[:i,] , self.path_results, self.chain, 'mu_A')
-                #save_tau
-                f_MCMC.save_chain(chain_tau_R[:i,] , self.path_results, self.chain, 'tau_R')
-                f_MCMC.save_chain(chain_tau_G[:i,] , self.path_results, self.chain, 'tau_G')
-                f_MCMC.save_chain(chain_tau_P[:i,] , self.path_results, self.chain, 'tau_P')
-                f_MCMC.save_chain(chain_tau_A[:i,] , self.path_results, self.chain, 'tau_A')
-                
-                #save C
-                f_MCMC.save_chain(chain_C[:i,] , self.path_results, self.chain, 'C')
-        
-        #save_beta
-        f_MCMC.save_chain(chain_beta , self.path_results, self.chain, 'beta')
-        
-        #save_eta
-        f_MCMC.save_chain(chain_eta , self.path_results, self.chain, 'eta')
-        
-        #save xi
-        f_MCMC.save_chain(chain_xi , self.path_results, self.chain, 'xi')
-        
-        #save_alpha
-        f_MCMC.save_chain(chain_alpha , self.path_results, self.chain, 'alpha')
-        
-        #save_mu
-        f_MCMC.save_chain(chain_mu_R , self.path_results, self.chain, 'mu_R')
-        f_MCMC.save_chain(chain_mu_G , self.path_results, self.chain, 'mu_G')
-        f_MCMC.save_chain(chain_mu_P , self.path_results, self.chain, 'mu_P')
-        f_MCMC.save_chain(chain_mu_A , self.path_results, self.chain, 'mu_A')
-        
-        #save_tau
-        f_MCMC.save_chain(chain_tau_R , self.path_results, self.chain, 'tau_R')
-        f_MCMC.save_chain(chain_tau_G , self.path_results, self.chain, 'tau_G')
-        f_MCMC.save_chain(chain_tau_P , self.path_results, self.chain, 'tau_P')
-        f_MCMC.save_chain(chain_tau_A , self.path_results, self.chain, 'tau_A')
-        
-        #save C
-        f_MCMC.save_chain(chain_C , self.path_results, self.chain, 'C')
-        
-        # print(np.mean(chain_beta, axis = 0))
-        # print(np.mean(chain_eta))
-        # print(np.mean(chain_xi))
-        # print(np.mean(chain_alpha))
-        # print('acceptance rate swap')
-        # print(np.mean(self.acceptance_swap))
-                
+        self._save(samples)
+        if self.nb_T > 1:
+            print('swap acceptance rate per pair of temperatures')
+            print(dict(zip([(self.vect_T[k], self.vect_T[k + 1]) for k in range(self.nb_T - 1)],
+                     np.round(self.swap_acceptance_rates(), 3).tolist())))
+
     def run_adaptive_MCMC(self, nb_phases, niter, burnin):
         """
         Run the MCMC with an adaptive phase at the beginning.
         """
-        i = 0
-        while (i < nb_phases) :
-            print("Adaptive phase {} :".format(str(i)))
-            self.run_MCMC(100) #Run 100 iteration of MCMC
+        for phase in range(nb_phases):
+            print("Adaptive phase {} :".format(str(phase)))
+            self.run_MCMC(100)  # Run 100 iterations of MCMC
 
-            #Compute the acceptance rates and update the proposal standard deviations
-            acceptance_rates_eta_c1 = np.mean(self.acceptance_eta_chain1)
-            acceptance_rates_eta_c2 = np.mean(self.acceptance_eta_chain2)
-            acceptance_rates_eta_c3 = np.mean(self.acceptance_eta_chain3)
-            acceptance_rates_eta_c4 = np.mean(self.acceptance_eta_chain4)
-            acceptance_rates_eta_c5 = np.mean(self.acceptance_eta_chain5)
-            self.chain1.eta.proposal_sds = f_MCMC.adaptive_proposals(acceptance_rates_eta_c1, self.chain1.eta.proposal_sds, 0.44)
-            self.chain2.eta.proposal_sds = f_MCMC.adaptive_proposals(acceptance_rates_eta_c2, self.chain2.eta.proposal_sds, 0.44)
-            self.chain3.eta.proposal_sds = f_MCMC.adaptive_proposals(acceptance_rates_eta_c3, self.chain3.eta.proposal_sds, 0.44)
-            self.chain4.eta.proposal_sds = f_MCMC.adaptive_proposals(acceptance_rates_eta_c4, self.chain4.eta.proposal_sds, 0.44)
-            self.chain5.eta.proposal_sds = f_MCMC.adaptive_proposals(acceptance_rates_eta_c5, self.chain5.eta.proposal_sds, 0.44)
-            acceptance_rates_beta_c1 = np.nanmean(self.acceptance_beta_chain1, axis = 0)
-            acceptance_rates_beta_c1[np.isnan(acceptance_rates_beta_c1)] = 0.44
-            acceptance_rates_beta_c1[np.nansum(self.chain1.acceptance_beta, axis = 0) == 1] = 0.44
-            acceptance_rates_beta_c1[np.nansum(1-self.chain1.acceptance_beta, axis = 0) == 1] = 0.44
-            acceptance_rates_beta_c2 = np.nanmean(self.acceptance_beta_chain1, axis = 0)
-            acceptance_rates_beta_c2[np.isnan(acceptance_rates_beta_c1)] = 0.44
-            acceptance_rates_beta_c2[np.nansum(self.chain1.acceptance_beta, axis = 0) == 1] = 0.44
-            acceptance_rates_beta_c2[np.nansum(1-self.chain1.acceptance_beta, axis = 0) == 1] = 0.44
-            acceptance_rates_beta_c3 = np.nanmean(self.acceptance_beta_chain1, axis = 0)
-            acceptance_rates_beta_c3[np.isnan(acceptance_rates_beta_c1)] = 0.44
-            acceptance_rates_beta_c3[np.nansum(self.chain1.acceptance_beta, axis = 0) == 1] = 0.44
-            acceptance_rates_beta_c3[np.nansum(1-self.chain1.acceptance_beta, axis = 0) == 1] = 0.44
-            acceptance_rates_beta_c4 = np.nanmean(self.acceptance_beta_chain1, axis = 0)
-            acceptance_rates_beta_c4[np.isnan(acceptance_rates_beta_c1)] = 0.44
-            acceptance_rates_beta_c4[np.nansum(self.chain1.acceptance_beta, axis = 0) == 1] = 0.44
-            acceptance_rates_beta_c4[np.nansum(1-self.chain1.acceptance_beta, axis = 0) == 1] = 0.44
-            acceptance_rates_beta_c5 = np.nanmean(self.acceptance_beta_chain1, axis = 0)
-            acceptance_rates_beta_c5[np.isnan(acceptance_rates_beta_c1)] = 0.44
-            acceptance_rates_beta_c5[np.nansum(self.chain1.acceptance_beta, axis = 0) == 1] = 0.44
-            acceptance_rates_beta_c5[np.nansum(1-self.chain1.acceptance_beta, axis = 0) == 1] = 0.44
-            for j in range(len(self.chain1.beta.beta_curr)) :
-                   self.chain1.beta.proposal_sds[j] = f_MCMC.adaptive_proposals(acceptance_rates_beta_c1[j], self.chain1.beta.proposal_sds[j], 0.44)  
-                   self.chain2.beta.proposal_sds[j] = f_MCMC.adaptive_proposals(acceptance_rates_beta_c2[j], self.chain2.beta.proposal_sds[j], 0.44)
-                   self.chain3.beta.proposal_sds[j] = f_MCMC.adaptive_proposals(acceptance_rates_beta_c3[j], self.chain3.beta.proposal_sds[j], 0.44)
-                   self.chain4.beta.proposal_sds[j] = f_MCMC.adaptive_proposals(acceptance_rates_beta_c4[j], self.chain4.beta.proposal_sds[j], 0.44)
-                   self.chain5.beta.proposal_sds[j] = f_MCMC.adaptive_proposals(acceptance_rates_beta_c5[j], self.chain5.beta.proposal_sds[j], 0.44)
-            
-            print(self.chain1.CA_star)
+            # Compute the acceptance rates and update the proposal standard deviations
+            for k, ch in enumerate(self.chains):
+                rate_eta = np.mean(self.acceptance_eta[k])
+                ch.eta.proposal_sds = f_MCMC.adaptive_proposals(rate_eta, ch.eta.proposal_sds, 0.44)
+
+                with np.errstate(invalid='ignore'):
+                    rates_beta = np.nanmean(self.acceptance_beta[k], axis=0)
+                rates_beta[np.isnan(rates_beta)] = 0.44
+                rates_beta[np.nansum(ch.acceptance_beta, axis=0) == 1] = 0.44
+                rates_beta[np.nansum(1 - ch.acceptance_beta, axis=0) == 1] = 0.44
+                for j in range(len(ch.beta.beta_curr)):
+                    ch.beta.proposal_sds[j] = f_MCMC.adaptive_proposals(rates_beta[j], ch.beta.proposal_sds[j], 0.44)
+
+                if k == 0:
+                    rates_beta_c1, rate_eta_c1 = rates_beta, rate_eta
+
+            print("n clusters")
+            print(len(np.unique(self.chain1.C.C_curr[self.chain1.i_expo])))
+            print("active clusters")
+            print(np.unique(self.chain1.C.C_curr[self.chain1.i_expo]))
             print('beta')
             print(self.chain1.beta.beta_curr)
-            print(acceptance_rates_beta_c1)
+            print(rates_beta_c1)
             print('eta')
-            print(acceptance_rates_eta_c1)
+            print(rate_eta_c1)
             print(self.chain1.xi.xi_curr)
-            i+= 1
-        
+            if self.nb_T > 1:
+                print('swap acceptance rate per pair of temperatures')
+                print(dict(zip([(self.vect_T[k], self.vect_T[k + 1]) for k in range(self.nb_T - 1)],
+                               np.round(self.swap_acceptance_rates(), 3).tolist())))
+
         self.run_MCMC(niter)
+

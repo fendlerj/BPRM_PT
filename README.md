@@ -30,7 +30,7 @@ python main_postproc.py
 ```
 To use highlight a clustering structure in the data based on the similarity matrix using the partitionning around the medoids post-processing, run PAM_postprocessing.R
 ```bash
-Rscript PAM_postprocessing.py
+Rscript PAM_postprocessing.R
 ```
 Note : In all the previous file, the paths to find the code, the data and the results must be modified.
 

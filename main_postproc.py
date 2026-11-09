@@ -7,7 +7,7 @@ Created on Thu Apr 20 09:34:19 2023
 
 import numpy as np
 import os
-os.chdir('path_code')#path where the files function_postproc
+os.chdir('path_code')#path to the file function_postproc
 import function_postproc as f_postproc
 
 #Path to save the results
@@ -19,7 +19,7 @@ chain_C = np.load(path_results + "/v1"  + chain + 'C'+ ".npy")
 n_burnin = 10000
 nb_iter = chain_C.shape[0]
 S_mean = np.zeros((len(chain_C[0]),len(chain_C[0])))
-for iter_C in range(n_burnin +1 ,nb_iter) :
+for iter_C in range(n_burnin, nb_iter) :
     if iter_C % 500 == 0:
         print(iter_C)
     S_mean += f_postproc.compute_similarity_matrix(chain_C[iter_C])/(nb_iter - n_burnin)

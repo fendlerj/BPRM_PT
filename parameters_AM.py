@@ -21,9 +21,15 @@ class Alpha(Parameter_Gibbs):
         
     def update_parameter(self, V, A):
         shape = len(A) + self.prior_shape
-        V[V == 1] = 0.999999999 #avoid numeric errors
-        rate = self.prior_intensity - np.sum(np.log(1 - V[A]))
-        self.alpha_curr = stats.gamma.rvs(a = shape, scale = 1/rate, size = 1)[0]
+        V[V == 1.] = (1 - 2**(-22))  #avoid numeric errors
+        rate = self.prior_intensity - np.sum(np.log(1. - V[A]))
+        draw_alpha = stats.gamma.rvs(a = shape, scale = 1/rate, size = 1)[0]
+        if draw_alpha == 0. :
+            draw_alpha = (2**(-149)) #avoid numerical issue
+        self.alpha_curr = draw_alpha
+       
+        
+        
     
 
 class V(Parameter_Gibbs):
@@ -36,17 +42,22 @@ class V(Parameter_Gibbs):
         
     def update_parameter_A(self, A, C, alpha):
         #update the alaments of V in the active set
-        for c in A :
-            a = 1 + np.sum(C ==c)
-            b = alpha + np.sum(C > c)
-            self.V_curr[c] = stats.beta.rvs(a,b)
+        A = np.asarray(A)
+        n = np.bincount(C[C >= 0], minlength=len(self.V_curr))
+        n_greater = np.concatenate((np.cumsum(n[::-1])[::-1][1:], [0]))   # number in clusters > c
+        self.V_curr[A] = np.minimum(np.random.beta(1 + n[A], alpha + n_greater[A]), 1 - 1e-12)
+            
     
     def update_parameter_P(self, CA_star, U_star, alpha, Phi):
         #update the element of V in the potential set
-        c = CA_star
-        while np.sum(Phi[:c]) <= (1 - U_star) and c < len(self.V_curr):
+        c = CA_star + 1
+        prod = np.prod(1 - self.V_curr[:c])
+        while (1 - prod) <= (1 - U_star) and c < len(self.V_curr):
             self.V_curr[c] = stats.beta.rvs(1, alpha)
+            prod *= 1 - self.V_curr[c]
             c+=1
+        if (1 - prod) <= (1 - U_star):
+            print("Warning: Cmax = {} reached, increase Cmax".format(len(self.V_curr)))
         return(c)
             
             
@@ -71,9 +82,7 @@ class Phi():
         self.phi_curr = phi
         
     def update_parameter(self, V):
-        self.phi_curr[0] = V[0]
-        for c in range(1,len(self.phi_curr)):
-            self.phi_curr[c] = V[c]*np.prod((1 - V[:c]))
+        self.phi_curr = V * np.concatenate(([1.], np.cumprod(1 - V[:-1])))
             
         
 class C(Parameter_Gibbs):
@@ -135,7 +144,6 @@ def log_proba_indiv( mu_R, mu_G, mu_P, mu_A, tau_R, tau_G, tau_P, tau_A,
     #For a given individual i, compute the non-normalised log probability of belonging to each cluster
     logproba = event_i*jnp.log(risk_ratio)/T - ibh_i*risk_ratio/T
     logproba +=  10**(-25)*xi*S_eta_beta_C/T - (prior_param_xi_0 + nevent/T)*jnp.log(prior_param_xi_1 + 10**(-25)/T*S_eta_beta_C)
-    logproba += jnp.log(phi) 
     logproba += log_proba_cont_indiv_jit(mu_R, mu_G, mu_P, mu_A, tau_R, tau_G, tau_P, tau_A, Z_R_i, Z_G_i, Z_P_i, Z_A_i, T)
     return logproba
 
@@ -159,9 +167,10 @@ def draw_C( mu_R, mu_G, mu_P, mu_A, tau_R, tau_G, tau_P, tau_A,
     res = random.categorical(key_cat, logits = logproba, axis=-1, shape=None)
     return res
 
-draw_C_vec = vmap(draw_C, in_axes = (None, None, None, None, None, 
+
+draw_C_vec = jit(vmap(draw_C, in_axes = (None, None, None, None, None, 
                                      None, None, None, None, None, None, None, None, None, 0, 0, 0, 
-                                     0, 0, 0, None, 0, None, 0, None)) #Parallelise the drawing of the cluster membership over all the individuals
+                                     0, 0, 0, None, 0, None, 0, None))) #Parallelise the drawing of the cluster membership over all the individuals
 
 
 

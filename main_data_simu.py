@@ -6,7 +6,7 @@ Created on Tue Apr 11 15:00:20 2023
 """
 
 import os
-os.chdir('path_code') #path where the files basics, parameters_AM, parameters_EM, parameters_DM and MCMC are.
+os.chdir('path_code') #path to the folder containing the files basics, parameters_AM, parameters_EM, parameters_DM and MCMC 
 import numpy as np
 import basics as basics
 import parameters_AM as pAM
@@ -55,7 +55,7 @@ nb_iter= 30000
 #Number of iterations during the burnin period
 burnin = 10000
 #Number of iterations during the burnin phase
-nb_phases = 50
+nb_phases = 100
 
 
 #Maximum number of cluster - if too small a warning will be printed
@@ -106,10 +106,11 @@ np.random.seed(seed)
 random.seed(seed)
 
 #Initialisation of the MCMC sampler
+#To run the code without parallel tempering, set vect_T = [1.0]
 MCMC = MCMC.MCMC_PT(chain, path_results, disease_model, alpha_start, C_start, V_start, phi_start,
                  U_start, mu_R_start, tau_R_start, mu_G_start, tau_G_start, mu_P_start, tau_P_start,
                  mu_A_start, tau_A_start, beta_start, eta_start, xi_start,
-                 Z_R, Z_G, Z_P, Z_A, y, trunc_y, event, i_expo, seed)
+                 Z_R, Z_G, Z_P, Z_A, y, trunc_y, event, i_expo, seed, vect_T=[1.0, 1.10, 1.21, 1.33, 1.46, 1.61, 1.77], swap_every=10)
 
 
 #Start and time the MCMC algorithm

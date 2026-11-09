@@ -51,6 +51,20 @@ class chain_MCMC():
         self.i_expo = i_expo
         self.key = random.PRNGKey(seed)
         self.T = T
+
+    def _swap_clusters(self, j, l, swap_V=False):
+        C = self.C.C_curr
+        mj, ml = (C == j), (C == l)
+        C[mj], C[ml] = l, j
+        for arr in (self.beta.beta_curr,
+                    self.mu_R.mu_curr, self.tau_R.tau_curr,
+                    self.mu_G.mu_curr, self.tau_G.tau_curr,
+                    self.mu_P.mu_curr, self.tau_P.tau_curr,
+                    self.mu_A.mu_curr, self.tau_A.tau_curr):
+            arr[[j, l]] = arr[[l, j]]
+        if swap_V:
+            self.V.V_curr[[j, l]] = self.V.V_curr[[l, j]]
+            self.phi.update_parameter(self.V.V_curr)
     
         
     def iter_1(self, iter_i):
@@ -86,28 +100,31 @@ class chain_MCMC():
         
         if self.CA_star > 1:
             # label switching move 1
-            label_j, label_l, accept_switch = f_MCMC.label_switching_m1(self.C.C_curr, self.phi.phi_curr, self.CA_star)
+            label_j, label_l, accept_switch = f_MCMC.label_switching_m1(self.C.C_curr, self.phi.phi_curr, self.CA_star + 1)
             if accept_switch : 
-                self.C.C_curr[label_j], self.C.C_curr[label_l] = self.C.C_curr[label_l], self.C.C_curr[label_j]
+                self._swap_clusters(label_j, label_l)
+                self.acceptance_beta[:,label_l], self.acceptance_beta[:,label_j] = self.acceptance_beta[:,label_j], self.acceptance_beta[:,label_l] 
             #label_switching move 2
-            label_j, accept_switch = f_MCMC.label_switching_m2(self.C.C_curr, self.V.V_curr, self.CA_star)
+            label_j, accept_switch = f_MCMC.label_switching_m2(self.C.C_curr, self.V.V_curr, self.CA_star + 1)
             if accept_switch : 
-                self.C.C_curr[label_j], self.C.C_curr[label_j +1] = self.C.C_curr[label_j +1], self.C.C_curr[label_j]
+                self._swap_clusters(label_j, label_j + 1, swap_V=True)
+                self.acceptance_beta[:,label_j], self.acceptance_beta[:,label_j + 1] = self.acceptance_beta[:,label_j + 1], self.acceptance_beta[:,label_j] 
             # label switching move 3
-            c, accept_switch = f_MCMC.label_switching_m3(
-                self.C.C_curr, self.phi.phi_curr, self.V.V_curr, self.alpha.alpha_curr, self.CA_star)
+            label_j, accept_switch = f_MCMC.label_switching_m3(
+                self.C.C_curr, self.phi.phi_curr, self.V.V_curr, self.alpha.alpha_curr, self.CA_star + 1)
             if accept_switch:
-                self.C.C_curr[c], self.C.C_curr[c +1] = self.C.C_curr[c +1], self.C.C_curr[c]
-        
+                self._swap_clusters(label_j, label_j + 1)
+                self.acceptance_beta[:,label_j], self.acceptance_beta[:,label_j + 1] = self.acceptance_beta[:,label_j + 1], self.acceptance_beta[:,label_j] 
         # update U
         self.U.update_parameter(self.phi.phi_curr, self.C.C_curr[self.i_expo], self.i_expo)
         
         #compute U_star et CA_star
-        U_star = f_MCMC.compute_U_star(self.U.U_curr)
+        U_star = f_MCMC.compute_U_star(self.U.U_curr, self.i_expo)
         self.CA_star = f_MCMC.compute_CA_star(self.C.C_curr[self.i_expo])
         
         #update alpha
         self.alpha.update_parameter(self.V.V_curr, self.set_A)
+        
         
         #update V[set_P] et CP_star
         CP_star = self.V.update_parameter_P(self.CA_star, U_star, self.alpha.alpha_curr, self.phi.phi_curr)
@@ -115,7 +132,7 @@ class chain_MCMC():
         #update phi
         self.phi.update_parameter(self.V.V_curr)
         self.set_P = np.array([k for k in range(self.CA_star + 1, min(CP_star,len(self.beta.beta_curr)))])
-        self.U.update_parameter(self.phi.phi_curr, self.C.C_curr[self.i_expo], self.i_expo)
+    
         
         if len(self.set_P) >0: # If the potential set is nor empty
             #update phi
@@ -143,6 +160,7 @@ class chain_MCMC():
         self.xi.update_parameter(self.disease_model, self.beta.beta_curr, self.eta.eta_curr, self.C.C_curr, 
                                   self.y, self.trunc_y, self.nevent, self.i_expo, self.T)
         # update C
+        self.key, subkey = random.split(self.key)
         self.C.update_parameter(self.disease_model, self.beta.beta_curr, self.xi.xi_curr,
                                 self.xi.prior_param[0], self.xi.prior_param[1], self.eta.eta_curr, self.mu_R.mu_curr, 
                                 self.mu_G.mu_curr, self.mu_P.mu_curr, self.mu_A.mu_curr, 
@@ -150,5 +168,9 @@ class chain_MCMC():
                                 self.tau_A.tau_curr,
                                 self.phi.phi_curr, self.Z_R, self.Z_G, self.Z_P, self.Z_A, 
                                 self.y, self.trunc_y, self.event, self.i_expo, self.nevent, self.U.U_curr,
-                                 self.phi.phi_curr, self.T, self.key, CP_star)
+                                 self.phi.phi_curr, self.T, subkey, CP_star)
+
+
+
+        
         

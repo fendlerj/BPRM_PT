@@ -19,9 +19,11 @@ def predictor(disease_model, beta, C):
     Return a vector of the value of the risk knowing the cluster membership for each individual
     """
     if disease_model == 'EHR':
-        return (1.0 + beta[C])
+        res = 1.0 + beta[C]
     elif disease_model == 'Cox':
-        return (np.exp(beta[C]))
+        res = np.exp(beta[C])
+    res[C == - 1] = 1
+    return res
     
     
 def integrated_baseline_hazard(eta, t0, t1):

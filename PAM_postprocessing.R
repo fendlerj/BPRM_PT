@@ -2,14 +2,17 @@ library(cluster)
 
 #Path to find the similarity matrix in a csv format
 path_sim <- "path"
+path_sim <- "/Users/julie/Library/CloudStorage/OneDrive-UniversityofCambridge/Documents/BPRM_PT/original_code/res"
 #Path to find the data in a csv format
 path_csv <- "path"
+path_csv <- "/Users/julie/Library/CloudStorage/OneDrive-UniversityofCambridge/Documents/BPRM_PT/original_code/BPRM_PT"
 #Path where to write the results
-path_csv <- path
+path_results <- "path"
+path_results <-"/Users/julie/Library/CloudStorage/OneDrive-UniversityofCambridge/Documents/BPRM_PT/original_code/res"
 
 #Load data and similarity matrix
-sim_mat <- read.csv(path_sim, header = FALSE)
-data <- read.csv(patg_csv, row.names = 1)
+sim_mat <- read.csv(paste0(path_sim, "/S_mean_chain1.csv"), header = FALSE)
+data <- read.csv(paste0(path_csv, "/data.csv"), row.names = 1)
 
 
 #Maximum number of clusters tested 
@@ -42,4 +45,4 @@ write.csv(cluster_pam$clustering, paste0(path_results, "/clustering.csv"))
 table(cluster_pam$clustering, data$C)
 
 
-# Note : the PAM procedure is determinist, this code contains no randomness!
+# Note : the PAM procedure is deterministic, this code contains no randomness!

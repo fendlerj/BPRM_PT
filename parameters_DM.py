@@ -8,6 +8,9 @@ from parameters import Parameter_MH, Parameter_Gibbs
 import basics as basics
 import numpy as np
 import scipy.stats as stats
+from scipy.special import ndtr
+ 
+XI_SCALE = 1e-25
 
 
 #There are different options for updating Beta with different prior distributions.
@@ -84,32 +87,56 @@ class Beta(Parameter_MH):
         self.param_beta = (5*self.prior_max - self.prior_min - 4*self.prior_mode)/(self.prior_max - self.prior_min)
     
     def update_parameter(self, disease_model, eta, C, y, trunc_y, event, nevent, prior_param_xi, API, i_expo, T):
-        accept = np.zeros(len(self.beta_curr))
+        K = len(self.beta_curr)
+        Ce = C[i_expo]
+        H = basics.integrated_baseline_hazard(eta, trunc_y, y)
+        # per-cluster sufficient statistics: number of events and summed integrated hazard
+        self._d_k = np.bincount(Ce, weights=event[i_expo], minlength=K)
+        self._H_k = np.bincount(Ce, weights=H[i_expo], minlength=K)
+        self._H_unexp = np.sum(H[~i_expo])
+        self._eta = eta
+        occupied = np.zeros(K, dtype=bool)
+        occupied[np.unique(Ce)] = True
+        accept = np.full(K, np.nan)
         for index in API:
-            accept[index] =  self.update_component(disease_model, eta, C, y, trunc_y, event, nevent, prior_param_xi, index, i_expo, T)
+            if occupied[index]:
+                accept[index] = self.update_component(disease_model, prior_param_xi, nevent, index, T)
+            else:
+                self.update_component_empty(index)
         return accept[API]
-        
-    def update_component(self, disease_model, eta, C, y, trunc_y, event, nevent, prior_param_xi, index, i_expo, T):
-        beta_curr_index = self.beta_curr[index] 
-        beta_cand = np.array(self.beta_curr, copy = True)
-        proposal_sds_index = self.proposal_sds[index]
-        a = (self.prior_min - beta_curr_index)/proposal_sds_index
-        b = (self.prior_max - beta_curr_index)/proposal_sds_index
-        beta_cand_index =  stats.truncnorm.rvs(a = a, b= b, loc = beta_curr_index, scale = self.proposal_sds[index]) 
-        if beta_cand_index == -1.:
-            beta_cand_index = -0.99999
-        beta_cand[index] = beta_cand_index
-        logratio = 1/T*np.dot(event[i_expo], np.log(basics.predictor(disease_model, beta_cand, C[i_expo])) - np.log(basics.predictor(disease_model, self.beta_curr, C[i_expo])))
-        logratio += 1/T*(prior_param_xi[0] + nevent)*(np.log(prior_param_xi[1] + 10**(-25)* basics.S_beta_eta_C(disease_model, self.beta_curr, eta, C, y, trunc_y, i_expo)) 
-                                                  - np.log(prior_param_xi[1] + 10**(-25)* basics.S_beta_eta_C(disease_model, beta_cand, eta, C, y, trunc_y, i_expo)))
-        logratio += ((self.param_alpha - 1)*(np.log(beta_cand_index - self.prior_min) - np.log(beta_curr_index - self.prior_min))
-                     + (self.param_beta - 1)*(np.log(self.prior_max - beta_cand_index) - np.log(self.prior_max - beta_curr_index)))
-        logratio += np.log(stats.norm.cdf((self.prior_max - beta_curr_index)/proposal_sds_index) - stats.norm.cdf((self.prior_min - beta_curr_index)/proposal_sds_index))
-        logratio -= np.log(stats.norm.cdf((self.prior_max - beta_cand_index)/proposal_sds_index) - stats.norm.cdf((self.prior_min - beta_cand_index)/proposal_sds_index))
+ 
+    def _rr(self, disease_model, b):
+        return 1.0 + b if disease_model == 'EHR' else np.exp(b)
+ 
+    def _S_beta_eta_C(self, disease_model, beta):
+        return (np.dot(self._rr(disease_model, beta), self._H_k) + self._H_unexp)/self._eta
+ 
+    def update_component(self, disease_model, prior_param_xi, nevent, index, T):
+        beta_curr = self.beta_curr[index]
+        sd = self.proposal_sds[index]
+        a = (self.prior_min - beta_curr)/sd
+        b = (self.prior_max - beta_curr)/sd
+        beta_cand = stats.truncnorm.rvs(a=a, b=b, loc=beta_curr, scale=sd)
+        if beta_cand == -1.:
+            beta_cand = -0.9999999
+        S_curr = self._S_beta_eta_C(disease_model, self.beta_curr)
+        S_cand = S_curr + (self._rr(disease_model, beta_cand) - self._rr(disease_model, beta_curr))*self._H_k[index]/self._eta
+        logratio = self._d_k[index]*(np.log(self._rr(disease_model, beta_cand)) - np.log(self._rr(disease_model, beta_curr)))/T
+        logratio += (prior_param_xi[0] + nevent/T)*(np.log(prior_param_xi[1] + XI_SCALE*S_curr/T)
+                                                    - np.log(prior_param_xi[1] + XI_SCALE*S_cand/T))
+        logratio += ((self.param_alpha - 1)*(np.log(beta_cand - self.prior_min) - np.log(beta_curr - self.prior_min))
+                     + (self.param_beta - 1)*(np.log(self.prior_max - beta_cand) - np.log(self.prior_max - beta_curr)))
+        logratio += np.log(ndtr((self.prior_max - beta_curr)/sd) - ndtr((self.prior_min - beta_curr)/sd))
+        logratio -= np.log(ndtr((self.prior_max - beta_cand)/sd) - ndtr((self.prior_min - beta_cand)/sd))
         accept = (np.log(np.random.uniform(0,1))<logratio)
         if accept :
-            self.beta_curr[index] = beta_cand_index
+            self.beta_curr[index] = beta_cand
         return accept
+
+    def update_component_empty(self, index):
+        self.beta_curr[index] = self.prior_min + (self.prior_max - self.prior_min) * \
+                            stats.beta.rvs(self.param_alpha, self.param_beta)
+
     
 class Eta(Parameter_MH):
     """ Eta is the shape parameter of the baseline hazard.
@@ -129,8 +156,8 @@ class Eta(Parameter_MH):
         logratio = self.prior_shape*(np.log(etab_cand) - np.log(self.etab_curr))
         logratio -= self.prior_intensity*(etab_cand - self.etab_curr)
         logratio += 1/T*np.dot(event,np.log(y))*(eta_cand - self.eta_curr)
-        logratio += 1/T*((prior_param_xi[0] + nevent)*(np.log(prior_param_xi[1] + 10**(-25)* basics.S_beta_eta_C(disease_model, beta, self.eta_curr, C, y, trunc_y, i_expo))
-                                                  - np.log(prior_param_xi[1] + 10**(-25)* basics.S_beta_eta_C(disease_model, beta, eta_cand, C, y, trunc_y, i_expo))))
+        logratio += ((prior_param_xi[0] + nevent/T)*(np.log(prior_param_xi[1] + 10**(-25)* basics.S_beta_eta_C(disease_model, beta, self.eta_curr, C, y, trunc_y, i_expo)/T)
+                                                  - np.log(prior_param_xi[1] + 10**(-25)* basics.S_beta_eta_C(disease_model, beta, eta_cand, C, y, trunc_y, i_expo)/T)))
         accept = (np.log(np.random.uniform(0,1))<logratio)
         
         self.eta_curr += (eta_cand-self.eta_curr)*accept
